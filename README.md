@@ -229,10 +229,10 @@ hysteria2://password@server:port?sni=example.com&insecure=0&obfs=salamander&obfs
 
 ### 健康检查机制
 
-程序启动时会自动对所有节点进行健康检查，之后每 30 秒定期检查一次：
+程序启动时会自动对所有节点进行健康检查，之后定期检查：
 
 - **初始检查**: 启动后立即检测所有节点的连通性
-- **定期检查**: 每 30 秒检查一次所有节点状态
+- **定期检查**: 每 5 分钟检查一次所有节点状态
 - **智能过滤**: 不可用节点自动从 WebUI 和导出列表中隐藏
 - **探测目标**: 通过 `management.probe_target` 配置（默认 `www.apple.com:80`）
 
@@ -268,6 +268,29 @@ management:
 
 ## Docker 部署
 
+**方式一：主机网络模式（推荐）**
+
+使用 `network_mode: host` 直接使用主机网络，无需手动映射端口：
+
+```yaml
+# docker-compose.yml
+services:
+  easy-proxies:
+    image: ghcr.io/jasonwong1991/easy_proxies:latest
+    container_name: easy-proxies
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./config.yaml:/etc/easy-proxies/config.yaml:ro
+      - ./nodes.txt:/etc/easy-proxies/nodes.txt:ro
+```
+
+> **优点**: 容器直接使用主机网络，所有端口自动对外开放，无需手动配置端口映射。
+
+**方式二：端口映射模式**
+
+手动指定需要映射的端口：
+
 ```yaml
 # docker-compose.yml
 services:
@@ -276,18 +299,15 @@ services:
     container_name: easy-proxies
     restart: unless-stopped
     ports:
-      # Pool 模式入口
-      - "2323:2323"
-      # Web 监控面板
-      - "9091:9091"
-      # Multi-port 模式端口范围（根据节点数量调整）
-      - "24000-24100:24000-24100"
+      - "2323:2323"       # Pool 模式入口
+      - "9091:9091"       # Web 监控面板
+      - "24000-24100:24000-24100"  # Multi-port 模式
     volumes:
       - ./config.yaml:/etc/easy-proxies/config.yaml:ro
       - ./nodes.txt:/etc/easy-proxies/nodes.txt:ro
 ```
 
-> **注意**: 多端口模式需要在 docker-compose.yml 中映射对应的端口范围。如果你有 N 个节点，需要开放 `24000` 到 `24000+N-1` 的端口。端口范围可以根据实际节点数量调整，例如只有 10 个节点可以改为 `24000-24010:24000-24010`。
+> **注意**: 多端口模式需要映射对应的端口范围。如果有 N 个节点，需要开放 `24000` 到 `24000+N-1` 的端口。
 
 ## 构建
 

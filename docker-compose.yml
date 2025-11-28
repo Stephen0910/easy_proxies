@@ -3,14 +3,16 @@ services:
     image: ghcr.io/jasonwong1991/easy_proxies:latest
     container_name: easy-proxies
     restart: unless-stopped
-    ports:
-      # Pool 模式入口
-      - "2323:2323"
-      # Web 监控面板
-      - "9091:9091"
-      # Multi-port 模式端口范围（根据节点数量调整）
-      # 如果有 N 个节点，需要开放 24000 到 24000+N-1
-      - "24000-24100:24000-24100"
+    # 方式一：使用主机网络模式（推荐，无需手动映射端口）
+    network_mode: host
+    # 方式二：手动映射端口（取消上面 network_mode 的注释，启用下面的 ports）
+    # ports:
+    #   # Pool 模式入口
+    #   - "2323:2323"
+    #   # Web 监控面板
+    #   - "9091:9091"
+    #   # Multi-port 模式端口范围（根据节点数量调整）
+    #   - "24000-24100:24000-24100"
     volumes:
       - ./config.yaml:/etc/easy-proxies/config.yaml:ro
       - ./nodes.txt:/etc/easy-proxies/nodes.txt:ro
