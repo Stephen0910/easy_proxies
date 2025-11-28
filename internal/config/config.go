@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -72,6 +73,13 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
+
+	// Resolve nodes_file path relative to config file directory
+	if cfg.NodesFile != "" && !filepath.IsAbs(cfg.NodesFile) {
+		configDir := filepath.Dir(path)
+		cfg.NodesFile = filepath.Join(configDir, cfg.NodesFile)
+	}
+
 	if err := cfg.normalize(); err != nil {
 		return nil, err
 	}
