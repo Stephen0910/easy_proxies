@@ -3,35 +3,19 @@ package app
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
-	"easy_proxies/internal/builder"
+	"easy_proxies/internal/boxmgr"
 	"easy_proxies/internal/config"
 	"easy_proxies/internal/monitor"
-	"easy_proxies/internal/outbound/pool"
-
-	"github.com/sagernet/sing-box"
-	"github.com/sagernet/sing-box/include"
+	"easy_proxies/internal/subscription"
 )
-
-// stdLogger adapts standard log to monitor.Logger interface
-type stdLogger struct{}
-
-func (l *stdLogger) Info(args ...any) {
-	log.Println(append([]any{"[health-check] "}, args...)...)
-}
-
-func (l *stdLogger) Warn(args ...any) {
-	log.Println(append([]any{"[health-check] ⚠️ "}, args...)...)
-}
 
 // Run builds the runtime components from config and blocks until shutdown.
 func Run(ctx context.Context, cfg *config.Config) error {
-	// 根据模式选择代理用户名密码
+	// Build monitor config
 	proxyUsername := cfg.Listener.Username
 	proxyPassword := cfg.Listener.Password
 	if cfg.Mode == "multi-port" {
@@ -48,46 +32,28 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		ProxyPassword: proxyPassword,
 		ExternalIP:    cfg.ExternalIP,
 	}
-	monitorMgr, err := monitor.NewManager(monitorCfg)
-	if err != nil {
-		return fmt.Errorf("init monitor: %w", err)
+
+	// Create and start BoxManager
+	boxMgr := boxmgr.New(cfg, monitorCfg)
+	if err := boxMgr.Start(ctx); err != nil {
+		return fmt.Errorf("start box manager: %w", err)
+	}
+	defer boxMgr.Close()
+
+	// Create and start SubscriptionManager if enabled
+	var subMgr *subscription.Manager
+	if cfg.SubscriptionRefresh.Enabled && len(cfg.Subscriptions) > 0 {
+		subMgr = subscription.New(cfg, boxMgr)
+		subMgr.Start()
+		defer subMgr.Stop()
+
+		// Wire up subscription manager to monitor server for API endpoints
+		if server := boxMgr.MonitorServer(); server != nil {
+			server.SetSubscriptionRefresher(subMgr)
+		}
 	}
 
-	buildResult, err := builder.Build(cfg)
-	if err != nil {
-		return err
-	}
-
-	inboundRegistry := include.InboundRegistry()
-	outboundRegistry := include.OutboundRegistry()
-	pool.Register(outboundRegistry)
-	endpointRegistry := include.EndpointRegistry()
-	dnsRegistry := include.DNSTransportRegistry()
-	serviceRegistry := include.ServiceRegistry()
-
-	ctx = box.Context(ctx, inboundRegistry, outboundRegistry, endpointRegistry, dnsRegistry, serviceRegistry)
-	ctx = monitor.ContextWith(ctx, monitorMgr)
-
-	instance, err := box.New(box.Options{Context: ctx, Options: buildResult})
-	if err != nil {
-		return fmt.Errorf("create sing-box instance: %w", err)
-	}
-	if err := instance.Start(); err != nil {
-		return fmt.Errorf("start sing-box: %w", err)
-	}
-
-	var monitorServer *monitor.Server
-	if monitorCfg.Enabled {
-		monitorServer = monitor.NewServer(monitorCfg, monitorMgr, log.Default())
-		monitorServer.Start(ctx)
-		defer monitorServer.Shutdown(context.Background())
-
-		monitorMgr.SetLogger(&stdLogger{})
-		// 启动定期健康检查（每5分钟检查一次，每个节点超时10秒）
-		monitorMgr.StartPeriodicHealthCheck(5*time.Minute, 10*time.Second)
-		defer monitorMgr.Stop()
-	}
-
+	// Wait for shutdown signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
@@ -97,5 +63,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	case sig := <-sigCh:
 		fmt.Printf("received %s, shutting down\n", sig)
 	}
-	return instance.Close()
+
+	return nil
 }

@@ -345,6 +345,9 @@ func (e *entry) snapshot() Snapshot {
 	latencyMs := int64(-1)
 	if e.lastProbe > 0 {
 		latencyMs = e.lastProbe.Milliseconds()
+		if latencyMs == 0 {
+			latencyMs = 1 // Round up sub-millisecond latencies to 1ms
+		}
 	}
 
 	return Snapshot{

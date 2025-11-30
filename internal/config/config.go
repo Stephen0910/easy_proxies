@@ -18,16 +18,17 @@ import (
 
 // Config describes the high level settings for the proxy pool server.
 type Config struct {
-	Mode          string           `yaml:"mode"`
-	Listener      ListenerConfig   `yaml:"listener"`
-	MultiPort     MultiPortConfig  `yaml:"multi_port"`
-	Pool          PoolConfig       `yaml:"pool"`
-	Management    ManagementConfig `yaml:"management"`
-	Nodes         []NodeConfig     `yaml:"nodes"`
-	NodesFile     string           `yaml:"nodes_file"`     // 节点文件路径，每行一个 URI
-	Subscriptions []string         `yaml:"subscriptions"`  // 订阅链接列表
-	ExternalIP    string           `yaml:"external_ip"`    // 外部 IP 地址，用于导出时替换 0.0.0.0
-	LogLevel      string           `yaml:"log_level"`
+	Mode                string                    `yaml:"mode"`
+	Listener            ListenerConfig            `yaml:"listener"`
+	MultiPort           MultiPortConfig           `yaml:"multi_port"`
+	Pool                PoolConfig                `yaml:"pool"`
+	Management          ManagementConfig          `yaml:"management"`
+	SubscriptionRefresh SubscriptionRefreshConfig `yaml:"subscription_refresh"`
+	Nodes               []NodeConfig              `yaml:"nodes"`
+	NodesFile           string                    `yaml:"nodes_file"`    // 节点文件路径，每行一个 URI
+	Subscriptions       []string                  `yaml:"subscriptions"` // 订阅链接列表
+	ExternalIP          string                    `yaml:"external_ip"`   // 外部 IP 地址，用于导出时替换 0.0.0.0
+	LogLevel            string                    `yaml:"log_level"`
 }
 
 // ListenerConfig defines how the HTTP proxy should listen for clients.
@@ -59,6 +60,16 @@ type ManagementConfig struct {
 	Listen      string `yaml:"listen"`
 	ProbeTarget string `yaml:"probe_target"`
 	Password    string `yaml:"password"` // WebUI 访问密码，为空则不需要密码
+}
+
+// SubscriptionRefreshConfig controls subscription auto-refresh and reload settings.
+type SubscriptionRefreshConfig struct {
+	Enabled            bool          `yaml:"enabled"`              // 是否启用定时刷新
+	Interval           time.Duration `yaml:"interval"`             // 刷新间隔，默认 1 小时
+	Timeout            time.Duration `yaml:"timeout"`              // 获取订阅的超时时间
+	HealthCheckTimeout time.Duration `yaml:"health_check_timeout"` // 新节点健康检查超时
+	DrainTimeout       time.Duration `yaml:"drain_timeout"`        // 旧实例排空超时时间
+	MinAvailableNodes  int           `yaml:"min_available_nodes"`  // 最少可用节点数，低于此值不切换
 }
 
 // NodeConfig describes a single upstream proxy endpoint expressed as URI.
@@ -136,6 +147,23 @@ func (c *Config) normalize() error {
 	if c.Management.Enabled == nil {
 		defaultEnabled := true
 		c.Management.Enabled = &defaultEnabled
+	}
+
+	// Subscription refresh defaults
+	if c.SubscriptionRefresh.Interval <= 0 {
+		c.SubscriptionRefresh.Interval = 1 * time.Hour
+	}
+	if c.SubscriptionRefresh.Timeout <= 0 {
+		c.SubscriptionRefresh.Timeout = 30 * time.Second
+	}
+	if c.SubscriptionRefresh.HealthCheckTimeout <= 0 {
+		c.SubscriptionRefresh.HealthCheckTimeout = 60 * time.Second
+	}
+	if c.SubscriptionRefresh.DrainTimeout <= 0 {
+		c.SubscriptionRefresh.DrainTimeout = 30 * time.Second
+	}
+	if c.SubscriptionRefresh.MinAvailableNodes <= 0 {
+		c.SubscriptionRefresh.MinAvailableNodes = 1
 	}
 
 	// Load nodes from file if specified

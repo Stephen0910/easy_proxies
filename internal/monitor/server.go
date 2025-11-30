@@ -16,6 +16,22 @@ import (
 //go:embed assets/index.html
 var embeddedFS embed.FS
 
+// SubscriptionRefresher interface for subscription manager.
+type SubscriptionRefresher interface {
+	RefreshNow() error
+	Status() SubscriptionStatus
+}
+
+// SubscriptionStatus represents subscription refresh status.
+type SubscriptionStatus struct {
+	LastRefresh  time.Time `json:"last_refresh"`
+	NextRefresh  time.Time `json:"next_refresh"`
+	NodeCount    int       `json:"node_count"`
+	LastError    string    `json:"last_error,omitempty"`
+	RefreshCount int       `json:"refresh_count"`
+	IsRefreshing bool      `json:"is_refreshing"`
+}
+
 // Server exposes HTTP endpoints for monitoring.
 type Server struct {
 	cfg          Config
@@ -23,6 +39,7 @@ type Server struct {
 	srv          *http.Server
 	logger       *log.Logger
 	sessionToken string // 简单的 session token，重启后失效
+	subRefresher SubscriptionRefresher
 }
 
 // NewServer constructs a server; it can be nil when disabled.
@@ -46,8 +63,17 @@ func NewServer(cfg Config, mgr *Manager, logger *log.Logger) *Server {
 	mux.HandleFunc("/api/nodes", s.withAuth(s.handleNodes))
 	mux.HandleFunc("/api/nodes/", s.withAuth(s.handleNodeAction))
 	mux.HandleFunc("/api/export", s.withAuth(s.handleExport))
+	mux.HandleFunc("/api/subscription/status", s.withAuth(s.handleSubscriptionStatus))
+	mux.HandleFunc("/api/subscription/refresh", s.withAuth(s.handleSubscriptionRefresh))
 	s.srv = &http.Server{Addr: cfg.Listen, Handler: mux}
 	return s
+}
+
+// SetSubscriptionRefresher sets the subscription refresher for API endpoints.
+func (s *Server) SetSubscriptionRefresher(sr SubscriptionRefresher) {
+	if s != nil {
+		s.subRefresher = sr
+	}
 }
 
 // Start launches the HTTP server.
@@ -127,7 +153,11 @@ func (s *Server) handleNodeAction(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]any{"error": err.Error()})
 			return
 		}
-		writeJSON(w, map[string]any{"message": "探测成功", "latency_ms": latency.Milliseconds()})
+		latencyMs := latency.Milliseconds()
+		if latencyMs == 0 && latency > 0 {
+			latencyMs = 1 // Round up sub-millisecond latencies to 1ms
+		}
+		writeJSON(w, map[string]any{"message": "探测成功", "latency_ms": latencyMs})
 	case "release":
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -264,4 +294,57 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=proxy_pool.txt")
 	_, _ = w.Write([]byte(strings.Join(lines, "\n")))
+}
+
+// handleSubscriptionStatus returns the current subscription refresh status.
+func (s *Server) handleSubscriptionStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.subRefresher == nil {
+		writeJSON(w, map[string]any{
+			"enabled": false,
+			"message": "订阅刷新未启用",
+		})
+		return
+	}
+
+	status := s.subRefresher.Status()
+	writeJSON(w, map[string]any{
+		"enabled":       true,
+		"last_refresh":  status.LastRefresh,
+		"next_refresh":  status.NextRefresh,
+		"node_count":    status.NodeCount,
+		"last_error":    status.LastError,
+		"refresh_count": status.RefreshCount,
+		"is_refreshing": status.IsRefreshing,
+	})
+}
+
+// handleSubscriptionRefresh triggers an immediate subscription refresh.
+func (s *Server) handleSubscriptionRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.subRefresher == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		writeJSON(w, map[string]any{"error": "订阅刷新未启用"})
+		return
+	}
+
+	if err := s.subRefresher.RefreshNow(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		writeJSON(w, map[string]any{"error": err.Error()})
+		return
+	}
+
+	status := s.subRefresher.Status()
+	writeJSON(w, map[string]any{
+		"message":    "刷新成功",
+		"node_count": status.NodeCount,
+	})
 }

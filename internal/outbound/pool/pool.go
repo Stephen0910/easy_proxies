@@ -258,7 +258,11 @@ func (p *poolOutbound) probeAllMembersOnStartup() {
 			}
 		} else {
 			_ = conn.Close()
-			p.logger.Info("initial probe success for ", member.tag, ", latency: ", latency.Milliseconds(), "ms")
+			latencyMs := latency.Milliseconds()
+			if latencyMs == 0 && latency > 0 {
+				latencyMs = 1 // Round up sub-millisecond latencies to 1ms
+			}
+			p.logger.Info("initial probe success for ", member.tag, ", latency: ", latencyMs, "ms")
 			availableCount++
 			if member.entry != nil {
 				member.entry.RecordSuccessWithLatency(latency) // 记录成功和延迟
