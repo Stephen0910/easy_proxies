@@ -72,9 +72,14 @@ management:
 geoip:
   enabled: false                                     # 是否启用 GeoIP 地域分区
   database_path: "./GeoLite2-Country.mmdb"           # GeoIP 数据库路径（首次启动时自动下载）
+  auto_update_enabled: true                          # 是否启用自动更新数据库（推荐）
+  auto_update_interval: 24h                          # 自动更新间隔（默认 24 小时）
   # listen: 0.0.0.0                                  # GeoIP 路由监听地址（默认使用 listener 配置）
   # port: 2323                                       # GeoIP 路由监听端口（默认 2323）
-  # 注意：启用后会自动从 GitHub 下载 GeoIP 数据库（约 9MB），无需手动下载
+  # 注意：
+  #   - 首次启动会自动从 GitHub 下载 GeoIP 数据库（约 9MB）
+  #   - 启用 auto_update_enabled 后，数据库会定期自动更新，无需重启容器
+  #   - 更新过程采用热重载，不会中断现有连接
 
 # ───────────────────────────────────────────────────────────────
 # 订阅自动刷新配置（可选）

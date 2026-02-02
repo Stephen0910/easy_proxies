@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"easy_proxies/internal/config"
 	"easy_proxies/internal/geoip"
@@ -33,7 +34,16 @@ func Build(cfg *config.Config) (option.Options, error) {
 	var geoLookup *geoip.Lookup
 	if cfg.GeoIP.Enabled && cfg.GeoIP.DatabasePath != "" {
 		var err error
-		geoLookup, err = geoip.New(cfg.GeoIP.DatabasePath)
+		// Use auto-update if enabled
+		if cfg.GeoIP.AutoUpdateEnabled {
+			interval := cfg.GeoIP.AutoUpdateInterval
+			if interval == 0 {
+				interval = 24 * time.Hour // Default to 24 hours
+			}
+			geoLookup, err = geoip.NewWithAutoUpdate(cfg.GeoIP.DatabasePath, interval)
+		} else {
+			geoLookup, err = geoip.New(cfg.GeoIP.DatabasePath)
+		}
 		if err != nil {
 			log.Printf("⚠️  GeoIP database load failed: %v (region routing disabled)", err)
 		} else {
